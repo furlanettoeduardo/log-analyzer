@@ -2,12 +2,14 @@ package io.github.furlanettoeduardo.loganalyzer;
 
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
+import io.github.furlanettoeduardo.loganalyzer.cli.SummaryCommand;
 
 @Command(
         name = "loganalyzer",
         mixinStandardHelpOptions = true,
         version = "loganalyzer 0.1.0",
-        description = "Analisa arquivos de log e agrega métricas."
+        description = "Analisa arquivos de log e agrega métricas.",
+        subcommands = { SummaryCommand.class }
 )
 public class LogAnalyzer implements Runnable {
 
@@ -18,6 +20,6 @@ public class LogAnalyzer implements Runnable {
 
     @Override
     public void run() {
-        System.out.println("Cadeia funcionando. Use --help.");
+        CommandLine.usage(this, System.out);
     }
 }

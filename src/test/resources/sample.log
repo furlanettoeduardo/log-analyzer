@@ -1,0 +1,30 @@
+2026-08-14T09:00:00.181Z WARN  com.acme.domain.ReservaService      traceId=1fe52c4e msg="op 0" duration_ms=51
+2026-08-14T09:00:00.294Z ERROR com.acme.domain.ReservaService      traceId=51e57636 msg="op 1" duration_ms=7
+2026-08-14T09:00:00.382Z INFO  com.acme.api.ReservaController      traceId=169616aa msg="op 2" duration_ms=2026
+2026-08-14T09:00:00.410Z WARN  com.acme.api.ReservaController      traceId=0093296d msg="op 3" duration_ms=124
+2026-08-14T09:00:00.429Z DEBUG com.acme.infra.JpaReservaRepository traceId=725b5ec8 msg="op 4"
+2026-08-14T09:00:00.574Z DEBUG com.acme.domain.ReservaService      traceId=adf597cf msg="op 5" duration_ms=23
+2026-08-14T09:00:00.625Z WARN  com.acme.api.PagamentoAdapter       traceId=8ab728b4 msg="op 6" duration_ms=7
+2026-08-14T09:00:00.710Z INFO  com.acme.api.PagamentoAdapter       traceId=afdc8302 msg="op 7" duration_ms=1347
+2026-08-14T09:00:00.730Z WARN  com.acme.api.ReservaController      traceId=eda6ce81 msg="op 8" duration_ms=38
+2026-08-14T09:00:00.751Z INFO  com.acme.api.PagamentoAdapter       traceId=ee82f717 msg="op 9" duration_ms=17
+2026-08-14T09:00:00.926Z DEBUG com.acme.domain.ReservaService      traceId=f1ee7f32 msg="op 10" duration_ms=250
+2026-08-14T09:00:01.006Z ERROR com.acme.infra.JpaReservaRepository traceId=c53197ec msg="op 11" duration_ms=1079
+2026-08-14T09:00:01.043Z WARN  com.acme.api.ReservaController      traceId=0357fd65 msg="op 12" duration_ms=21
+2026-08-14T09:00:01.206Z INFO  com.acme.api.ReservaController      traceId=36e1d62a msg="op 13" duration_ms=964
+2026-08-14T09:00:01.244Z INFO  com.acme.api.PagamentoAdapter       traceId=187d60a9 msg="op 14"
+2026-08-14T09:00:01.290Z INFO  com.acme.api.PagamentoAdapter       traceId=da76effd msg="op 15"
+2026-08-14T09:00:01.333Z ERROR com.acme.domain.ReservaService      traceId=57ac8e59 msg="op 16"
+2026-08-14T09:00:01.433Z WARN  com.acme.domain.ReservaService      traceId=3b0e0a46 msg="op 17" duration_ms=9
+2026-08-14T09:00:01.532Z ERROR com.acme.infra.JpaReservaRepository traceId=a766bd0d msg="op 18" duration_ms=1033
+2026-08-14T09:00:01.573Z ERROR com.acme.infra.JpaReservaRepository traceId=94a69306 msg="op 19" duration_ms=43
+2026-08-14T09:00:01.580Z INFO  com.acme.infra.JpaReservaRepository traceId=f30e6c72 msg="op 20"
+2026-08-14T09:00:01.725Z INFO  com.acme.domain.ReservaService      traceId=2828201e msg="op 21" duration_ms=1926
+2026-08-14T09:00:01.857Z DEBUG com.acme.domain.ReservaService      traceId=02437acd msg="op 22" duration_ms=23
+2026-08-14T09:00:01.879Z ERROR com.acme.api.ReservaController      traceId=c0cf8a19 msg="op 23" duration_ms=666
+2026-08-14T09:00:01.906Z INFO  com.acme.domain.ReservaService      traceId=e71b8034 msg="op 24" duration_ms=89
+2026-08-14T09:00:02.017Z DEBUG com.acme.api.PagamentoAdapter       traceId=6d0acdfa msg="op 25" duration_ms=13
+2026-08-14T09:00:02.063Z INFO  com.acme.api.ReservaController      traceId=0a3470ba msg="op 26" duration_ms=102
+2026-08-14T09:00:02.105Z INFO  com.acme.api.ReservaController      traceId=40874b85 msg="op 27" duration_ms=34
+2026-08-14T09:00:02.301Z ERROR com.acme.infra.JpaReservaRepository traceId=b8b9b13f msg="op 28" duration_ms=35
+2026-08-14T09:00:02.400Z ERROR com.acme.domain.ReservaService      traceId=3b9c72b2 msg="op 29" duration_ms=72
