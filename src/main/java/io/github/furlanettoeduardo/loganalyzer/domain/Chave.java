@@ -1,24 +1,14 @@
 package io.github.furlanettoeduardo.loganalyzer.domain;
 
-import java.util.Comparator;
-
 /**
  * Chave composta de agrupamento. Sendo record, ganha equals/hashCode por valor —
  * que é o contrato exigido por HashMap e, portanto, por Collectors.groupingBy.
  *
- * <p>Comparable, ao contrário, não vem de graça: record não implica ordem natural.
- * Precisa estar aqui para a chave poder ser usada em desempate genérico
- * ({@code <K extends Comparable<? super K>>}), como String e Level já são.
+ * <p>De propósito NÃO implementa Comparable: igualdade tem definição natural (todos os
+ * campos iguais), ordenação não — nível antes de logger, ou o contrário? Quem apresenta
+ * decide, passando um Comparator. Ver TopCommand.imprimir.
  */
-public record Chave(Level nivel, String logger) implements Comparable<Chave> {
-
-    private static final Comparator<Chave> ORDEM =
-            Comparator.comparing(Chave::nivel).thenComparing(Chave::logger);
-
-    @Override
-    public int compareTo(Chave outra) {
-        return ORDEM.compare(this, outra);
-    }
+public record Chave(Level nivel, String logger) {
 
     @Override
     public String toString() {

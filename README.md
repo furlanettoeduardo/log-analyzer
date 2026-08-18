@@ -10,7 +10,8 @@ java -cp "target/classes;$(cat target/cp.txt)" \
 
 Gerador de massa de teste: `node tools/gen-logs.js 500000 app.log`.
 
-Comandos: `summary [--parallel]` e `top [--by logger|nivel|nivel-logger] [--limit N]`.
+Comandos: `summary [--parallel]`, `top [--by logger|nivel|nivel-logger] [--limit N]` e
+`window [--size 30s|1m|5m|1h] [--limit N] [--naive] [--parallel]`.
 
 Saída:
 
@@ -150,3 +151,98 @@ error: unreported exception IOException; must be caught or declared to be thrown
 É por isso que existe `UncheckedIOException` — e é dele que este projeto depende sem
 perceber: `Files.lines` declara `IOException` na abertura (tratada no `call()`), mas uma
 falha de leitura no meio do stream chega como `UncheckedIOException`.
+
+## O comando window e o Collector customizado
+
+```
+$ loganalyzer window app.log --size 1m --limit 5
+janelas de 1m: 830  (mostrando 5, Collector customizado)
+janela                       linhas   amostras       min     média       p95       p99       max
+2026-08-14T09:00:00Z            592        510       6ms     337ms    1753ms    2660ms    2882ms
+2026-08-14T09:01:00Z            578        497       6ms     357ms    1779ms    2521ms    2857ms
+```
+
+`linhas` conta tudo que caiu na janela; `amostras` só o que tinha `duration_ms`. As duas
+informações saem do mesmo passo via `teeing`, e `Optional.stream()` descarta as linhas
+sem duração sem filtro solto.
+
+### Por que combiner() existe se o stream é sequencial?
+
+Porque `Collector` é um contrato, não uma implementação para o seu caso. Em stream
+sequencial o `combiner` **nunca é chamado**. Verificado trocando o combiner por um que
+sempre lança, sobre 200.000 amostras:
+
+```
+sequencial: PT3M18S                          <- passou sem tocar no combiner
+paralelo:   AssertionError: combiner chamado!
+```
+
+(de quebra, o `PT3M18S` é o `Duration.toString()` em ISO-8601 que o comando formata
+como ms na saída.) Ele existe porque é o que torna o collector
+utilizável em paralelo: cada thread acumula no seu próprio `Amostras`, e no fim as partes
+se fundem duas a duas. Sem combiner não há como dividir o trabalho, e é exatamente a
+diferença entre acumular em estado compartilhado (que quebrou o `total++` paralelo) e
+acumular em partes independentes que se juntam no fim.
+
+`AmostrasTest.paralelo_usa_o_combiner_e_da_o_mesmo_resultado` cobre isso com 10.000
+amostras embaralhadas: `parallelStream()` e `stream()` produzem o mesmo record.
+
+### Percentil exato ou aproximado?
+
+Escolhi **exato**, guardando todas as amostras num `long[]` primitivo que cresce por
+duplicação. O raciocínio é sobre o `n` que importa: percentil exato precisa das amostras
+todas, mas aqui elas são por janela — uma janela de 1m tem ~500 amostras, não 500 mil.
+Memória O(n) por janela, com n pequeno e limitado pelo tamanho da janela, não pelo
+tamanho do arquivo. E `long[]` evita o boxing que uma `List<Long>` traria.
+
+Histograma de buckets ou t-digest trocam exatidão por memória constante, e valem quando
+a janela é ilimitada (um stream que nunca fecha) ou quando há milhões de séries
+simultâneas — que é o caso do Prometheus, e por isso o histograma dele dá p99
+aproximado, dependente da configuração dos buckets.
+
+### O que a medição mostrou (e desmentiu)
+
+Sobre o `app.log` de 500 mil linhas, comparando os dois caminhos:
+
+```
+pipeline inteiro (parse + agregação)     tempo      alocado
+  ingenuo  (List<Duration>)             1676 ms    1975,3 MB
+  collector (long[])                    1626 ms    1974,0 MB
+```
+
+Empate — porque o parsing domina: quase 2 GB de alocação são strings, matchers e
+objetos de domínio. **Otimizar a agregação aqui não mudaria nada**, e a medição é o que
+mostra isso.
+
+Isolando só a fase de agregação, sobre as 498.528 entradas já parseadas:
+
+```
+só a agregação                           tempo      alocado
+  ingenuo  (List<Duration>)               87 ms      69,4 MB
+  collector (long[])                      72 ms      68,0 MB
+  collector + filter/mapping              71 ms      28,9 MB
+  ingenuo  + filter/mapping               106 ms     30,2 MB
+```
+
+O collector é ~1,5× mais rápido que o caminho ingênuo (72 vs 106 ms com o mesmo filtro),
+porque `Arrays.sort(long[])` não paga boxing nem indireção.
+
+A surpresa está na terceira linha: trocar `flatMapping(e -> e.duracao().stream(), ...)`
+por `filter` + `mapping` derrubou a alocação de 68 MB para 28,9 MB. O custo não estava
+onde eu tinha anotado — cada `Optional.stream()` aloca um `Stream` por elemento, e eram
+~39 MB só disso. O código mantém o `flatMapping` porque expressa melhor a intenção e a
+diferença é irrelevante no pipeline completo; a nota fica registrada para o Bloco 13.
+
+### Janelas de tamanho arbitrário
+
+`instant.truncatedTo(unidade)` não serve: exige unidade que divida o dia sem resto.
+
+```
+UnsupportedTemporalTypeException: Unit must divide into a standard day without remainder
+```
+
+A saída é aritmética sobre o epoch — `Math.floorDiv(epochMs, tamanhoMs) * tamanhoMs` —
+que aceita 30s, 7min, o que for. Consequência a entender: as janelas passam a ser
+ancoradas no epoch, não no dia. Com `--size 7m`, `09:07:33Z` cai na janela `09:01:00Z`,
+porque 29.778.301 minutos desde 1970 é múltiplo de 7 — e é justamente essa
+não-coincidência com o início do dia que o `truncatedTo` se recusa a produzir.

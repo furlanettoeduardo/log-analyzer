@@ -62,8 +62,9 @@ class SummaryCommandTest {
             Resumo resumo = SummaryCommand.resumir(linhas, parser);
 
             assertThat(resumo.total()).isEqualTo(2);
+            // "###" falha já no Instant.parse, antes de chegar no nível
             assertThat(resumo.malformadas()).containsExactly(
-                    java.util.Map.entry(Motivo.NIVEL_DESCONHECIDO, 1L));
+                    java.util.Map.entry(Motivo.TIMESTAMP_INVALIDO, 1L));
         } finally {
             Files.deleteIfExists(arquivo);
         }

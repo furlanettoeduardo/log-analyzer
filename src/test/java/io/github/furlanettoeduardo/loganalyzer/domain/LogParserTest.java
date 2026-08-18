@@ -3,6 +3,9 @@ package io.github.furlanettoeduardo.loganalyzer.domain;
 import io.github.furlanettoeduardo.loganalyzer.domain.ParseResult.Motivo;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.time.Instant;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 class LogParserTest {
@@ -14,12 +17,12 @@ class LogParserTest {
         LogEntry entry = entryDe(
                 "2026-08-14T09:12:33.482Z INFO  com.acme.api.ReservaController  traceId=7f3a2b91 msg=\"reserva criada\" duration_ms=142");
 
-        assertThat(entry.timestamp()).isEqualTo("2026-08-14T09:12:33.482Z");
+        assertThat(entry.timestamp()).isEqualTo(Instant.parse("2026-08-14T09:12:33.482Z"));
         assertThat(entry.nivel()).isEqualTo(Level.INFO);
         assertThat(entry.logger()).isEqualTo("com.acme.api.ReservaController");
         assertThat(entry.traceId()).isEqualTo("7f3a2b91");
         assertThat(entry.mensagem()).isEqualTo("reserva criada");
-        assertThat(entry.duracao()).contains("142");
+        assertThat(entry.duracao()).contains(Duration.ofMillis(142));
     }
 
     @Test
@@ -66,10 +69,17 @@ class LogParserTest {
                 .isInstanceOf(ParseResult.Malformed.class)
                 .extracting(r -> ((ParseResult.Malformed) r).motivo())
                 .isEqualTo(Motivo.NIVEL_DESCONHECIDO);
+    }
 
-        // a linha corrompida do gerador cai aqui, e não em ESTRUTURA_INVALIDA:
-        // "### linha corrompida ###" tem os quatro campos posicionais
-        assertThat(motivoDe("### linha corrompida ###")).isEqualTo(Motivo.NIVEL_DESCONHECIDO);
+    /**
+     * A ordem das validações decide qual motivo ganha: a linha corrompida do gerador
+     * tem os quatro campos posicionais, mas "###" já falha como Instant, antes do nível.
+     */
+    @Test
+    void deve_reportar_timestamp_invalido() {
+        assertThat(motivoDe("### linha corrompida ###")).isEqualTo(Motivo.TIMESTAMP_INVALIDO);
+        assertThat(motivoDe("14/08/2026 INFO com.acme.api.X traceId=abc123 msg=\"ok\""))
+                .isEqualTo(Motivo.TIMESTAMP_INVALIDO);
     }
 
     @Test
@@ -89,7 +99,7 @@ class LogParserTest {
         String linha = "### linha corrompida ###";
 
         assertThat(parser.parse(linha))
-                .isEqualTo(new ParseResult.Malformed(linha, Motivo.NIVEL_DESCONHECIDO));
+                .isEqualTo(new ParseResult.Malformed(linha, Motivo.TIMESTAMP_INVALIDO));
     }
 
     // switch exaustivo: sem default, o compilador garante que os dois casos estão cobertos

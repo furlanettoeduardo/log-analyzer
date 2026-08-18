@@ -12,6 +12,7 @@ import picocli.CommandLine.Parameters;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -64,13 +65,18 @@ public class TopCommand implements Callable<Integer> {
             Stream<ParseResult> resultados = linhas.map(parser::parse);
 
             // K é inferido em cada ramo: String, Level, Chave. Nenhum Object no caminho.
+            // O desempate vem de fora: ordem é decisão de quem apresenta, não do dado.
             switch (by) {
-                case LOGGER       -> imprimir(contar(resultados, LogEntry::logger));
-                case NIVEL        -> imprimir(contar(resultados, LogEntry::nivel));
+                case LOGGER       -> imprimir(contar(resultados, LogEntry::logger),
+                                              Comparator.naturalOrder());
+                case NIVEL        -> imprimir(contar(resultados, LogEntry::nivel),
+                                              Comparator.naturalOrder());
                 // lambda com parâmetro tipado: uma lambda implícita (e -> ...) não
                 // participa da inferência do K aninhado, e o compilador cai em Object
                 case NIVEL_LOGGER -> imprimir(contar(resultados,
-                        (LogEntry e) -> new Chave(e.nivel(), e.logger())));
+                                                     (LogEntry e) -> new Chave(e.nivel(), e.logger())),
+                                              Comparator.comparing(Chave::nivel)
+                                                        .thenComparing(Chave::logger));
             }
         }
 
@@ -89,17 +95,22 @@ public class TopCommand implements Callable<Integer> {
     }
 
     /**
-     * O bound Comparable é o que permite desempatar comparando as chaves diretamente,
-     * em vez de cair no toString() que o Map<Object, Long> obrigava.
+     * O desempate chega como Comparator, não como bound Comparable: assim o Chave não
+     * precisa inventar uma ordem natural que não tem.
+     *
+     * <p>{@code Comparator<? super K>} e não {@code Comparator<K>} porque um comparador
+     * de supertipo serve: um {@code Comparator<Object>} (comparar por toString, por
+     * exemplo) ordena Chave perfeitamente. Comparator consome K, e parâmetro que consome
+     * aceita supertipo — o "super" do PECS.
      */
-    private <K extends Comparable<? super K>> void imprimir(Map<K, Long> contagem) {
+    private <K> void imprimir(Map<K, Long> contagem, Comparator<? super K> desempate) {
         System.out.printf("top %d por %s (%d agrupamentos)%n",
                 limit, by.name().toLowerCase(Locale.ROOT).replace('_', '-'), contagem.size());
 
         // desempate pela chave: sem isso, empates saem em ordem imprevisível entre execuções
         contagem.entrySet().stream()
                 .sorted(Map.Entry.<K, Long>comparingByValue().reversed()
-                        .thenComparing(Map.Entry.comparingByKey()))
+                        .thenComparing(Map.Entry::getKey, desempate))
                 .limit(limit)
                 .forEach(entrada -> System.out.printf("%9d  %s%n", entrada.getValue(), entrada.getKey()));
     }

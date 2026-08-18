@@ -12,6 +12,7 @@ public sealed interface ParseResult {
 
     enum Motivo {
         ESTRUTURA_INVALIDA,
+        TIMESTAMP_INVALIDO,
         NIVEL_DESCONHECIDO,
         TRACE_ID_AUSENTE,
         MENSAGEM_AUSENTE
