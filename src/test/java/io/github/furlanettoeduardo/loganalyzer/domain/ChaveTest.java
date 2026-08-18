@@ -29,6 +29,20 @@ class ChaveTest {
     }
 
     @Test
+    void tem_ordem_natural_para_desempate_generico() {
+        // record não implica Comparable; a ordem foi declarada de propósito para o
+        // bound <K extends Comparable<? super K>> do TopCommand.imprimir aceitar Chave
+        Chave erroApi = new Chave(Level.ERROR, "com.acme.api.X");
+        Chave erroDominio = new Chave(Level.ERROR, "com.acme.domain.Y");
+        Chave infoDominio = new Chave(Level.INFO, "com.acme.domain.Y");
+
+        assertThat(erroApi).isLessThan(erroDominio);      // mesmo nível, desempata por logger
+        assertThat(infoDominio).isLessThan(erroApi);      // INFO vem antes de ERROR no enum
+        assertThat(List.of(erroDominio, erroApi, infoDominio).stream().sorted().toList())
+                .containsExactly(infoDominio, erroApi, erroDominio);
+    }
+
+    @Test
     void hashCode_e_consistente_com_equals() {
         Chave a = new Chave(Level.WARN, "com.acme.domain.ReservaService");
         Chave b = new Chave(Level.WARN, "com.acme.domain.ReservaService");

@@ -12,10 +12,10 @@ import picocli.CommandLine.Parameters;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Comparator;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
@@ -41,7 +41,11 @@ public class TopCommand implements Callable<Integer> {
 
     private final LogParser parser = new LogParser();
 
-    /** Aceita nivel-logger além de NIVEL_LOGGER, que é o nome da constante. */
+    /**
+     * Aceita nivel-logger além de NIVEL_LOGGER. Lança de propósito: argumento de CLI
+     * errado é erro do usuário, e o picocli precisa da exceção para imprimir o usage.
+     * Contraste com Level.parse, que devolve Optional porque log ruim é caso esperado.
+     */
     static class CriterioConverter implements ITypeConverter<Criterio> {
         @Override
         public Criterio convert(String valor) {
@@ -57,46 +61,46 @@ public class TopCommand implements Callable<Integer> {
         }
 
         try (Stream<String> linhas = Files.lines(arquivo, StandardCharsets.UTF_8)) {
-            // mapMulti filtra e transforma num passo: o consumidor só recebe o que interessa
-            Map<Object, Long> contagem = linhas
-                    .map(parser::parse)
-                    .<LogEntry>mapMulti((resultado, consumidor) -> {
-                        if (resultado instanceof ParseResult.Ok(LogEntry entry)) {
-                            consumidor.accept(entry);
-                        }
-                    })
-                    .collect(Collectors.groupingBy(this::chaveDe, Collectors.counting()));
+            Stream<ParseResult> resultados = linhas.map(parser::parse);
 
-            imprimir(contagem);
+            // K é inferido em cada ramo: String, Level, Chave. Nenhum Object no caminho.
+            switch (by) {
+                case LOGGER       -> imprimir(contar(resultados, LogEntry::logger));
+                case NIVEL        -> imprimir(contar(resultados, LogEntry::nivel));
+                // lambda com parâmetro tipado: uma lambda implícita (e -> ...) não
+                // participa da inferência do K aninhado, e o compilador cai em Object
+                case NIVEL_LOGGER -> imprimir(contar(resultados,
+                        (LogEntry e) -> new Chave(e.nivel(), e.logger())));
+            }
         }
 
         return 0;
     }
 
-    private Object chaveDe(LogEntry entry) {
-        return switch (by) {
-            case LOGGER -> entry.logger();
-            case NIVEL -> entry.nivel();
-            case NIVEL_LOGGER -> new Chave(entry.nivel(), entry.logger());
-        };
+    private <K> Map<K, Long> contar(Stream<ParseResult> resultados, Function<LogEntry, K> chave) {
+        // mapMulti filtra e transforma num passo: o consumidor só recebe o que interessa
+        return resultados
+                .<LogEntry>mapMulti((resultado, consumidor) -> {
+                    if (resultado instanceof ParseResult.Ok(LogEntry entry)) {
+                        consumidor.accept(entry);
+                    }
+                })
+                .collect(Collectors.groupingBy(chave, Collectors.counting()));
     }
 
-    private void imprimir(Map<Object, Long> contagem) {
+    /**
+     * O bound Comparable é o que permite desempatar comparando as chaves diretamente,
+     * em vez de cair no toString() que o Map<Object, Long> obrigava.
+     */
+    private <K extends Comparable<? super K>> void imprimir(Map<K, Long> contagem) {
         System.out.printf("top %d por %s (%d agrupamentos)%n",
                 limit, by.name().toLowerCase(Locale.ROOT).replace('_', '-'), contagem.size());
 
         // desempate pela chave: sem isso, empates saem em ordem imprevisível entre execuções
         contagem.entrySet().stream()
-                .sorted(Map.Entry.<Object, Long>comparingByValue().reversed()
-                        .thenComparing(entrada -> entrada.getKey().toString()))
+                .sorted(Map.Entry.<K, Long>comparingByValue().reversed()
+                        .thenComparing(Map.Entry.comparingByKey()))
                 .limit(limit)
                 .forEach(entrada -> System.out.printf("%9d  %s%n", entrada.getValue(), entrada.getKey()));
     }
-
-    // Comparator explícito equivalente ao encadeamento acima, deixado como nota:
-    // Comparator.comparing(Map.Entry<Object, Long>::getValue).reversed()
-    //           .thenComparing(e -> e.getKey().toString())
-    static final Comparator<Map.Entry<Object, Long>> POR_CONTAGEM_DESC =
-            Map.Entry.<Object, Long>comparingByValue().reversed()
-                    .thenComparing(entrada -> entrada.getKey().toString());
 }

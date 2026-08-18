@@ -60,6 +60,10 @@ public class SummaryCommand implements Callable<Integer> {
      * dois collectors com o mesmo elemento e funde os resultados no fim. Cada lado usa
      * flatMapping para ficar só com o caso que lhe interessa — sem estado mutável, o que
      * é o que permite rodar em paralelo sem mudar uma linha.
+     *
+     * <p>Nota de custo: Stream.of/Stream.empty() aloca dois streams efêmeros por linha
+     * (1 milhão em 500 mil linhas). Candidato a Collectors.filtering + Collectors.mapping
+     * se o profiling do Bloco 13 apontar — não antes, que seria otimizar sem medir.
      */
     private static final Collector<ParseResult, ?, Resumo> RESUMO = Collectors.teeing(
             Collectors.flatMapping(SummaryCommand::apenasEntry,
@@ -80,11 +84,15 @@ public class SummaryCommand implements Callable<Integer> {
         }
 
         try (Stream<String> linhas = Files.lines(arquivo, StandardCharsets.UTF_8)) {
-            Stream<String> fonte = paralelo ? linhas.parallel() : linhas;
-            imprimir(fonte.map(parser::parse).collect(RESUMO));
+            imprimir(resumir(paralelo ? linhas.parallel() : linhas, parser));
         }
 
         return 0;
+    }
+
+    /** A agregação isolada do IO e da impressão, para poder ser testada nos dois modos. */
+    static Resumo resumir(Stream<String> linhas, LogParser parser) {
+        return linhas.map(parser::parse).collect(RESUMO);
     }
 
     private static Stream<LogEntry> apenasEntry(ParseResult resultado) {
