@@ -53,13 +53,33 @@ class LogParserTest {
     }
 
     @Test
-    void deve_distinguir_o_motivo_de_cada_falha() {
+    void deve_reportar_estrutura_invalida() {
         assertThat(motivoDe("linha curta")).isEqualTo(Motivo.ESTRUTURA_INVALIDA);
-        assertThat(motivoDe("### linha corrompida ###")).isEqualTo(Motivo.NIVEL_DESCONHECIDO);
-        assertThat(motivoDe("2026-08-14T09:12:33.482Z FATAL com.acme.api.X traceId=abc123 msg=\"ok\""))
+    }
+
+    @Test
+    void deve_reportar_nivel_desconhecido() {
+        var resultado = parser.parse(
+                "2026-08-14T09:00:06.000Z FATAL com.acme.api.X traceId=aaaa1111 msg=\"nivel novo\"");
+
+        assertThat(resultado)
+                .isInstanceOf(ParseResult.Malformed.class)
+                .extracting(r -> ((ParseResult.Malformed) r).motivo())
                 .isEqualTo(Motivo.NIVEL_DESCONHECIDO);
+
+        // a linha corrompida do gerador cai aqui, e não em ESTRUTURA_INVALIDA:
+        // "### linha corrompida ###" tem os quatro campos posicionais
+        assertThat(motivoDe("### linha corrompida ###")).isEqualTo(Motivo.NIVEL_DESCONHECIDO);
+    }
+
+    @Test
+    void deve_reportar_trace_id_ausente() {
         assertThat(motivoDe("2026-08-14T09:12:33.482Z INFO com.acme.api.X msg=\"sem trace\""))
                 .isEqualTo(Motivo.TRACE_ID_AUSENTE);
+    }
+
+    @Test
+    void deve_reportar_mensagem_ausente() {
         assertThat(motivoDe("2026-08-14T09:12:33.482Z INFO com.acme.api.X traceId=abc123 duration_ms=10"))
                 .isEqualTo(Motivo.MENSAGEM_AUSENTE);
     }

@@ -6,6 +6,7 @@ import io.github.furlanettoeduardo.loganalyzer.domain.LogParser;
 import io.github.furlanettoeduardo.loganalyzer.domain.ParseResult;
 import io.github.furlanettoeduardo.loganalyzer.domain.ParseResult.Motivo;
 import picocli.CommandLine.Command;
+import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 
 import java.nio.charset.StandardCharsets;
@@ -14,10 +15,14 @@ import java.nio.file.Path;
 import java.util.EnumMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
+import java.util.function.Function;
+import java.util.stream.Collector;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Command(
         name = "summary",
+        mixinStandardHelpOptions = true,
         description = "Conta linhas e agrega totais por nível."
 )
 public class SummaryCommand implements Callable<Integer> {
@@ -25,15 +30,47 @@ public class SummaryCommand implements Callable<Integer> {
     @Parameters(index = "0", description = "Arquivo de log a analisar.")
     private Path arquivo;
 
+    @Option(names = "--parallel", description = "Processa o stream em paralelo.")
+    private boolean paralelo;
+
     private final LogParser parser = new LogParser();
 
-    private long total;
-    private long trace;
-    private long debug;
-    private long info;
-    private long warn;
-    private long error;
-    private final Map<Motivo, Long> malformadas = new EnumMap<>(Motivo.class);
+    /** As duas contagens que interessam, produzidas num único passo pelo stream. */
+    public record Resumo(Map<Level, Long> porNivel, Map<Motivo, Long> malformadas) {
+
+        public long totalValidas() {
+            return soma(porNivel);
+        }
+
+        public long totalMalformadas() {
+            return soma(malformadas);
+        }
+
+        public long total() {
+            return totalValidas() + totalMalformadas();
+        }
+
+        private static long soma(Map<?, Long> mapa) {
+            return mapa.values().stream().mapToLong(Long::longValue).sum();
+        }
+    }
+
+    /**
+     * teeing resolve o "preciso de duas coisas e collect só devolve uma": alimenta os
+     * dois collectors com o mesmo elemento e funde os resultados no fim. Cada lado usa
+     * flatMapping para ficar só com o caso que lhe interessa — sem estado mutável, o que
+     * é o que permite rodar em paralelo sem mudar uma linha.
+     */
+    private static final Collector<ParseResult, ?, Resumo> RESUMO = Collectors.teeing(
+            Collectors.flatMapping(SummaryCommand::apenasEntry,
+                    Collectors.groupingBy(LogEntry::nivel,
+                            () -> new EnumMap<Level, Long>(Level.class),
+                            Collectors.counting())),
+            Collectors.flatMapping(SummaryCommand::apenasMotivo,
+                    Collectors.groupingBy(Function.identity(),
+                            () -> new EnumMap<Motivo, Long>(Motivo.class),
+                            Collectors.counting())),
+            Resumo::new);
 
     @Override
     public Integer call() throws Exception {
@@ -43,45 +80,34 @@ public class SummaryCommand implements Callable<Integer> {
         }
 
         try (Stream<String> linhas = Files.lines(arquivo, StandardCharsets.UTF_8)) {
-            linhas.forEach(linha -> {
-                total++;
-                // sem default, sem instanceof, sem cast: o compilador sabe que só há dois casos
-                switch (parser.parse(linha)) {
-                    case ParseResult.Ok(LogEntry entry) -> contar(entry.nivel());
-                    case ParseResult.Malformed(String texto, Motivo motivo) -> registrarFalha(motivo);
-                }
-            });
+            Stream<String> fonte = paralelo ? linhas.parallel() : linhas;
+            imprimir(fonte.map(parser::parse).collect(RESUMO));
         }
 
-        imprimir();
         return 0;
     }
 
-    private void contar(Level nivel) {
-        switch (nivel) {
-            case TRACE -> trace++;
-            case DEBUG -> debug++;
-            case INFO -> info++;
-            case WARN -> warn++;
-            case ERROR -> error++;
+    private static Stream<LogEntry> apenasEntry(ParseResult resultado) {
+        return switch (resultado) {
+            case ParseResult.Ok(LogEntry entry) -> Stream.of(entry);
+            case ParseResult.Malformed malformed -> Stream.empty();
+        };
+    }
+
+    private static Stream<Motivo> apenasMotivo(ParseResult resultado) {
+        return switch (resultado) {
+            case ParseResult.Ok ok -> Stream.empty();
+            case ParseResult.Malformed(String linha, Motivo motivo) -> Stream.of(motivo);
+        };
+    }
+
+    private void imprimir(Resumo resumo) {
+        System.out.println("Total de linhas: " + resumo.total());
+        for (Level nivel : Level.values()) {
+            System.out.printf("%-6s %d%n", nivel + ":", resumo.porNivel().getOrDefault(nivel, 0L));
         }
-    }
-
-    private void registrarFalha(Motivo motivo) {
-        malformadas.merge(motivo, 1L, Long::sum);
-    }
-
-    private void imprimir() {
-        System.out.println("Total de linhas: " + total);
-        System.out.println("TRACE: " + trace);
-        System.out.println("DEBUG: " + debug);
-        System.out.println("INFO:  " + info);
-        System.out.println("WARN:  " + warn);
-        System.out.println("ERROR: " + error);
-
-        long totalMalformadas = malformadas.values().stream().mapToLong(Long::longValue).sum();
-        System.out.println("Malformadas: " + totalMalformadas);
-        malformadas.forEach((motivo, quantas) ->
+        System.out.println("Malformadas: " + resumo.totalMalformadas());
+        resumo.malformadas().forEach((motivo, quantas) ->
                 System.out.printf("  %-20s %d%n", motivo, quantas));
     }
 }

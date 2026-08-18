@@ -10,6 +10,8 @@ java -cp "target/classes;$(cat target/cp.txt)" \
 
 Gerador de massa de teste: `node tools/gen-logs.js 500000 app.log`.
 
+Comandos: `summary [--parallel]` e `top [--by logger|nivel|nivel-logger] [--limit N]`.
+
 Saída:
 
 ```
@@ -104,3 +106,47 @@ aviso, mesmo com `-Xlint:all -Werror`.
 Os dois usos de ausência ficam separados de propósito: `Optional.empty()` no `duracao` é
 "linha válida, campo não existia"; `Malformed` é "não deu para ler a linha", e o `Motivo`
 diz qual dos quatro pontos falhou.
+
+## Agregação: duas contagens num passo só
+
+`collect` devolve uma coisa, e o `summary` precisa de duas (por nível e por motivo de
+falha). A saída é `Collectors.teeing`, que alimenta dois collectors com o mesmo elemento
+e funde os resultados — cada lado usando `flatMapping` com um switch exaustivo sobre o
+`ParseResult` para ficar só com o caso que lhe interessa:
+
+```java
+Collectors.teeing(
+    Collectors.flatMapping(SummaryCommand::apenasEntry,  groupingBy(LogEntry::nivel, ..., counting())),
+    Collectors.flatMapping(SummaryCommand::apenasMotivo, groupingBy(identity(),      ..., counting())),
+    Resumo::new)
+```
+
+Sem campo mutável em lugar nenhum — por isso `--parallel` dá exatamente os mesmos
+números (500.000 linhas, 1.472 malformadas nos dois casos). É a diferença entre acumular
+em estado compartilhado e acumular em acumuladores independentes que se fundem no fim.
+
+## Dois experimentos que valem registro
+
+**O contrato de hashCode.** `top --by nivel-logger` agrupa por `record Chave(Level, String)`.
+Trocando o record por uma classe comum sem `equals`/`hashCode`, sobre o mesmo `app.log`:
+
+```
+linhas validas:               498528
+grupos com record Chave:      16
+grupos com classe sem equals: 498528      <- um grupo por objeto, todos de tamanho 1
+```
+
+`HashMap` procura o balde pelo `hashCode` e confirma com `equals`. Sem os dois, cada
+instância nova é uma chave nova, e o `groupingBy` vira uma lista cara.
+
+**Checked exception dentro de lambda.** `Function.apply` não declara `throws`, então IO
+dentro de `.map()` não compila:
+
+```
+error: unreported exception IOException; must be caught or declared to be thrown
+        .map(p -> Files.readString(p))
+```
+
+É por isso que existe `UncheckedIOException` — e é dele que este projeto depende sem
+perceber: `Files.lines` declara `IOException` na abertura (tratada no `call()`), mas uma
+falha de leitura no meio do stream chega como `UncheckedIOException`.
