@@ -28,3 +28,4 @@
 2026-08-14T09:00:02.105Z INFO  com.acme.api.ReservaController      traceId=40874b85 msg="op 27" duration_ms=34
 2026-08-14T09:00:02.301Z ERROR com.acme.infra.JpaReservaRepository traceId=b8b9b13f msg="op 28" duration_ms=35
 2026-08-14T09:00:02.400Z ERROR com.acme.domain.ReservaService      traceId=3b9c72b2 msg="op 29" duration_ms=72
+2026-08-14T09:00:05.000Z ERROR com.acme.api.PagamentoAdapter traceId=deadbeef msg="request INFO header invalido"
