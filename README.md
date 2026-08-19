@@ -34,6 +34,9 @@ Rodar sem instalar nada:
 .\loganalyzer.ps1 summary app.log
 ```
 
+Testes: `./mvnw test` (36 testes, sem dependência de rede ou de arquivo externo — os que
+precisam de log usam `src/test/resources/sample.log` ou geram um temporário).
+
 Saída, sobre 500.000 linhas:
 
 ```
@@ -70,6 +73,44 @@ saem do mesmo passo, via `Collectors.teeing`.
 | `Chave` | record `(Level, String)` para agrupamento composto |
 | `Amostras` | acumulador em `long[]` do `Collector` customizado de latência |
 | `Estatisticas` | record com count, min, max, média, p95, p99 |
+
+---
+
+# Como isto foi construído
+
+O estado final não é o ativo — a trajetória é. Cada passo saiu de um incômodo concreto do
+passo anterior, e o `git log` é a prova:
+
+```
+$ git log --oneline --reverse
+43a182a chore: setup do projeto com Maven, Picocli e JUnit 5
+2d4ef71 feat: summary com contagem por nivel e leitura em stream
+5491959 feat: parser de log com tipos de dominio e resultado selado
+27cd7c1 feat: agregacao com Streams e comando top
+f2a27ae refactor: generics no TopCommand no lugar de Map<Object, Long>
+fd3114a feat: comando window com Collector customizado e tipagem temporal
+```
+
+1. **`linha.contains(" INFO ")`** e seis campos mutáveis (`2d4ef71`). Funcionava, e
+   confundia o campo com a mensagem. *Incômodo: o nível vinha de um palpite sobre a linha
+   inteira.*
+2. **`LogParser` + `record LogEntry`** (`5491959`). Separou "extrair campo" de "contar", e
+   o bug do `contains` morreu — provado por teste, não por execução. Na mesma etapa,
+   `enum Level` matou a comparação de String, e `sealed ParseResult` substituiu quatro
+   `return null` que significavam coisas diferentes. *Incômodo: o `null` não dizia o que
+   tinha falhado, e o compilador não obrigava ninguém a tratá-lo.*
+3. **Streams e Collectors** (`27cd7c1`). Os campos mutáveis viraram um `collect` com
+   `teeing`, e apareceu o comando `top`. *Incômodo: contar em campo de instância quebra em
+   paralelo — e quebrou, no experimento 2.*
+4. **Generics** (`f2a27ae`). O `top` agrupava em `Map<Object, Long>` e desempatava por
+   `toString()`, jogando fora a tipagem construída até ali. *Incômodo: `Object` usado como
+   se fosse valor de JS.*
+5. **`Collector.of` e tipagem temporal** (`fd3114a`). `Instant` e `Optional<Duration>` no
+   lugar de String, e um collector escrito do zero para p95/p99 numa passagem. *Incômodo:
+   sem tipo temporal não há como cortar janela, e composição de collectors prontos não
+   calcula percentil.*
+
+Cada incômodo virou um experimento, e os experimentos estão medidos abaixo.
 
 ---
 
@@ -159,6 +200,35 @@ A alternativa é acumular todas as violações numa lista, que é o que Bean Val
 Para diagnóstico de log em massa, fail-fast basta e é mais barato; para validar payload
 de request, acumular é melhor, porque o usuário quer ver todos os erros de uma vez.
 
+## 6. `Duration` no domínio, milissegundos na saída
+
+O tipo certo no domínio é `Duration`. O que ele **não** é, é formato de apresentação:
+
+```java
+Duration.ofMillis(198_000).toString()   // "PT3M18S"
+```
+
+`Duration.toString()` devolve ISO-8601. É correto e é ilegível num relatório de latência:
+comparar `PT0.142S` com `PT2.66S` de cabeça é pior que comparar `142ms` com `2660ms`. Por
+isso a saída passa por um formatador de uma linha:
+
+```java
+private static String ms(Duration duracao) { return duracao.toMillis() + "ms"; }
+```
+
+Isso apareceu sozinho no experimento 4, onde imprimi um `p99` direto e saiu `PT3M18S`. A
+armadilha não é do log: é o mesmo comportamento em qualquer lugar onde um `Duration`
+escapa para uma fronteira de apresentação — mensagem de erro, header HTTP, coluna de
+banco, JSON de API.
+
+E é o caso do JSON que morde de verdade: `Duration` não tem representação canônica em
+JSON, então cada stack escolhe uma. O Jackson, com o módulo de `java.time`, serializa
+como número decimal de segundos por padrão e como string ISO (`"PT3M18S"`) quando o
+`WRITE_DURATIONS_AS_TIMESTAMPS` está desligado — dois contratos incompatíveis para o
+mesmo tipo, decididos por configuração global. Anotado para conferir na prática no
+Bloco 1: **o consumidor da API precisa saber qual dos dois vai receber, e isso não está
+no tipo.**
+
 ---
 
 # Experimentos
@@ -246,8 +316,8 @@ paralelo:   AssertionError: combiner chamado!
 porque `Collector` é um **contrato**, e o contrato não sabe se vai ser usado em paralelo
 — quem decide é quem chama `collect`. Sem combiner não haveria como dividir o trabalho.
 
-(De quebra, o `PT3M18S` é o `Duration.toString()` em ISO-8601. A saída do comando formata
-como `198000ms`, porque log não se lê em ISO de duração.)
+O `PT3M18S` da primeira linha não era o ponto do experimento, mas rendeu a decisão 6:
+é o `Duration.toString()` em ISO-8601 vazando para a apresentação.
 
 ## 5. Checked exception dentro de lambda
 
