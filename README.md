@@ -450,6 +450,75 @@ próprio e as partes se fundem duas a duas na volta. É exatamente o que falta a
 
 ---
 
+# Para que isso serve
+
+O projeto nasceu como exercício de linguagem, mas o que saiu tem uso real. O nicho é
+específico: **você tem um arquivo de log na mão e não tem uma stack de observabilidade
+para jogá-lo dentro.**
+
+## Cenários
+
+**Triagem pós-incidente com o log baixado do servidor.** Alguém manda o `app.log` de
+ontem por Slack e pergunta "o que aconteceu às 14h?". `window --size 1m` responde onde a
+latência degradou, sem subir Grafana, sem importar nada em lugar nenhum:
+
+```
+loganalyzer window app.log --size 1m --limit 60
+```
+
+**Localizar o componente barulhento.** `top --by logger` mostra quem escreve mais linha.
+Isso vira dinheiro direto em qualquer SaaS que cobra por volume ingerido — Datadog,
+Splunk, New Relic — e o candidato a baixar de nível costuma aparecer no topo:
+
+```
+loganalyzer top app.log --by nivel-logger --limit 20
+```
+
+**Qualidade do próprio log.** As malformadas saem contadas por motivo, o que é uma
+métrica sobre o log, não sobre a aplicação. Foi assim que descobri que as 1.472 linhas
+corrompidas do arquivo de teste falham no timestamp, não no nível — e num log real esse
+número denuncia serviço com formato divergente, linha truncada por buffer cheio, ou
+encoding quebrado.
+
+**Comparar antes e depois de um deploy.** Dois arquivos, dois `summary`, e a diferença de
+`ERROR` e de p99 fica visível sem instrumentar nada.
+
+**Ambientes onde observabilidade não existe.** Máquina de cliente, on-prem sem rede,
+container de CI, job batch. A ferramenta é `java -cp` e um arquivo: roda offline, não
+precisa de agente, não manda dado para fora — o que também resolve o caso em que o log
+tem conteúdo que não pode sair da rede.
+
+**Validar um arquivo antes de ingerir.** Rodar `summary` antes de importar num pipeline
+diz quantas linhas seriam descartadas e por quê, em vez de descobrir depois que 3% dos
+dados sumiram na carga.
+
+## Dores que ele resolve
+
+| dor | por que grep/awk não bastam |
+|---|---|
+| Contar nível de verdade | `grep -c ERROR` conta substring em qualquer lugar da linha. Uma mensagem com "ERROR" no texto entra na conta. Está medido no experimento 7: 2.122 linhas no balde errado num corpus de 500 mil |
+| Enxergar a cauda | `awk` faz média fácil, percentil não. E média esconde exatamente o que o usuário sente: aqui a média é 337ms e o p99 é 2660ms, quase 8× |
+| Linha ruim que some calada | Pipeline de shell descarta o que não casa e não avisa. Aqui a linha inválida é contada e classificada por motivo |
+| Arquivo maior que a RAM | `sort` e editor estouram; ler tudo em memória estoura com `-Xmx64m` (experimento 1). O streaming processa 54 MB com pico de 36 MB de heap |
+| Empate com ordem instável | `sort -rn` desempata como der. Aqui o desempate é explícito, então duas execuções dão a mesma saída — importa quando você cola o resultado num ticket |
+| Percentil aproximado | Histograma de bucket (Prometheus) devolve p99 dependente da configuração. Sobre um arquivo fechado, aqui o p99 é exato |
+
+## Quando não usar
+
+Honestidade sobre o escopo, que é estreito de propósito:
+
+- **Formato é fixo.** Timestamp ISO-8601, nível, logger, `chave=valor`. Log em JSON, em
+  formato Apache/nginx, ou multi-linha com stack trace não é lido — a stack trace vira
+  várias linhas malformadas.
+- **Um arquivo por vez, e sem compressão.** Nada de glob, `.gz` ou diretório rotacionado.
+- **Não é tempo real.** Não tem `--follow`; é análise de arquivo fechado.
+- **Não filtra.** Não dá para recortar por período, logger ou nível antes de agregar —
+  hoje isso se faz com `grep` antes do pipe.
+- **Se você já tem observabilidade, use a sua.** Loki, Elastic ou Datadog fazem tudo isso
+  com histórico, alerta e correlação entre serviços. O valor daqui está justamente em
+  quando essa stack não está disponível — ou quando o custo de subir uma para responder
+  uma pergunta pontual não se paga.
+
 # Números de referência
 
 | | |
